@@ -53,5 +53,5 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Deployed
 
-- Vercel: _add link after deploying_
+- Vercel: https://nhl-draft-explorer.vercel.app/
 - GitHub: https://github.com/abearman1373/NHL-Draft-Explorer/tree/assignment-3
