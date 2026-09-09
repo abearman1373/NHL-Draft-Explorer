@@ -1,4 +1,30 @@
 import { getSupabaseServerClient } from "@/lib/supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const PAGE_SIZE = 1000;
+
+/**
+ * PostgREST caps an unpaginated select() at ~1000 rows by default, which
+ * silently truncates full-table scans on tables this size (~12k rows).
+ * Page through with .range() until a page comes back short.
+ */
+async function fetchAllRows<T>(
+  supabase: SupabaseClient,
+  table: string,
+  select: string
+): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase.from(table).select(select).range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as T[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return rows;
+}
 
 export type DraftPick = {
   id: number;
@@ -48,22 +74,33 @@ export async function getOverviewStats() {
 
 export async function getPositionBreakdown() {
   const supabase = getSupabaseServerClient();
-  const { data } = await supabase.from("players").select("primary_position");
+  const data = await fetchAllRows<{ primary_position: string | null }>(
+    supabase,
+    "players",
+    "primary_position"
+  );
   const counts = new Map<string, number>();
-  for (const row of data ?? []) {
+  for (const row of data) {
     const key = row.primary_position ?? "Other";
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return Array.from(counts, ([position, count]) => ({ position, count }));
 }
 
+type YearPositionRow = {
+  year: number;
+  player: { primary_position: string | null } | { primary_position: string | null }[] | null;
+};
+
 export async function getPicksPerYearByPosition() {
   const supabase = getSupabaseServerClient();
-  const { data } = await supabase
-    .from("draft_picks")
-    .select("year, player:players(primary_position)");
+  const data = await fetchAllRows<YearPositionRow>(
+    supabase,
+    "draft_picks",
+    "year, player:players(primary_position)"
+  );
   const byYear = new Map<number, Record<string, number>>();
-  for (const row of data ?? []) {
+  for (const row of data) {
     const player = Array.isArray(row.player) ? row.player[0] : row.player;
     const pos = player?.primary_position ?? "Other";
     const entry = byYear.get(row.year) ?? {};
@@ -75,14 +112,18 @@ export async function getPicksPerYearByPosition() {
 
 export async function getPickValueByRound() {
   const supabase = getSupabaseServerClient();
-  const { data } = await supabase
-    .from("draft_picks")
-    .select("round, player_id");
-  const { data: stats } = await supabase.from("player_stats").select("player_id, point_shares");
-  const shareByPlayer = new Map((stats ?? []).map((s) => [s.player_id, s.point_shares]));
+  const [picks, stats] = await Promise.all([
+    fetchAllRows<{ round: number; player_id: number }>(supabase, "draft_picks", "round, player_id"),
+    fetchAllRows<{ player_id: number; point_shares: number | null }>(
+      supabase,
+      "player_stats",
+      "player_id, point_shares"
+    ),
+  ]);
+  const shareByPlayer = new Map(stats.map((s) => [s.player_id, s.point_shares]));
 
   const byRound = new Map<number, { sum: number; n: number }>();
-  for (const row of data ?? []) {
+  for (const row of picks) {
     const share = shareByPlayer.get(row.player_id);
     if (share == null) continue;
     const entry = byRound.get(row.round) ?? { sum: 0, n: 0 };
@@ -114,20 +155,32 @@ export type PlayerSearchParams = {
 
 export async function searchPlayers({ q, position, page, pageSize }: PlayerSearchParams) {
   const supabase = getSupabaseServerClient();
-  let query = supabase
+
+  // Counting and fetching in one query forces Postgres to join+count every
+  // matching row (12k+) before it can apply the page limit, which times out.
+  // Do a cheap head-only count (no embeds) and a separate paginated fetch.
+  let countQuery = supabase.from("players").select("id", { count: "exact", head: true });
+  let dataQuery = supabase
     .from("players")
     .select(
-      "id, name, nationality, primary_position, draft_picks(year, overall_pick, team:teams(name)), player_stats(games_played, points, point_shares)",
-      { count: "exact" }
+      "id, name, nationality, primary_position, draft_picks(year, overall_pick, team:teams(name)), player_stats(games_played, points, point_shares)"
     );
 
-  if (q) query = query.ilike("name", `%${q}%`);
-  if (position && position !== "all") query = query.eq("primary_position", position);
+  if (q) {
+    countQuery = countQuery.ilike("name", `%${q}%`);
+    dataQuery = dataQuery.ilike("name", `%${q}%`);
+  }
+  if (position && position !== "all") {
+    countQuery = countQuery.eq("primary_position", position);
+    dataQuery = dataQuery.eq("primary_position", position);
+  }
 
   const from = (page - 1) * pageSize;
-  const { data, count } = await query
-    .order("name", { ascending: true })
-    .range(from, from + pageSize - 1);
+  const [{ count }, { data, error }] = await Promise.all([
+    countQuery,
+    dataQuery.order("name", { ascending: true }).range(from, from + pageSize - 1),
+  ]);
+  if (error) throw error;
 
   return { players: data ?? [], total: count ?? 0 };
 }

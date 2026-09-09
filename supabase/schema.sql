@@ -50,7 +50,9 @@ create table if not exists player_stats (
 
 create index if not exists idx_draft_picks_year on draft_picks (year);
 create index if not exists idx_draft_picks_team on draft_picks (team_id);
+create index if not exists idx_draft_picks_player on draft_picks (player_id);
 create index if not exists idx_players_position on players (primary_position);
+create index if not exists idx_players_name on players (name);
 
 alter table teams enable row level security;
 alter table amateur_teams enable row level security;
