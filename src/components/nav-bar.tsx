@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/", label: "Overview" },
   { href: "/players", label: "Players" },
   { href: "/teams", label: "Teams" },
+  { href: "/similarity", label: "Similarity Finder" },
 ];
 
 export function NavBar() {
