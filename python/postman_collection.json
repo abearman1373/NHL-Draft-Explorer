@@ -1,0 +1,130 @@
+{
+  "info": {
+    "name": "NHL Draft Pick Similarity API",
+    "description": "Assertions against the live Modal deployment of the draft-pick equity/similarity sklearn pipeline.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://abearman1373--nhl-draft-similarity-api-fastapi-app.modal.run"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test('reports loaded true', function () {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql('ok');",
+              "    pm.expect(body.loaded).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pipeline Info",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/pipeline-info"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test('describes the fitted artifact', function () {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body).to.have.property('steps').that.is.an('array');",
+              "    pm.expect(body).to.have.property('built_at');",
+              "    pm.expect(body).to.have.property('sklearn_version');",
+              "    pm.expect(body).to.have.property('n_samples').above(0);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Similar Picks - Valid (200)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{base_url}}/similar-picks",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"overall_pick\": 1,\n  \"age\": 18,\n  \"year\": 2024,\n  \"k\": 5\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test('returns k results with distances', function () {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.results).to.be.an('array').with.lengthOf(5);",
+              "    body.results.forEach((r) => pm.expect(r).to.have.property('distance'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Similar Picks - Invalid (422)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{base_url}}/similar-picks",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"overall_pick\": -5,\n  \"age\": 18,\n  \"year\": 2024\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 422', function () {",
+              "    pm.response.to.have.status(422);",
+              "});",
+              "pm.test('error references overall_pick bound', function () {",
+              "    const body = pm.response.json();",
+              "    pm.expect(JSON.stringify(body.detail)).to.include('overall_pick');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
